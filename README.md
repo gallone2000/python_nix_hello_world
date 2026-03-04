@@ -1,19 +1,21 @@
 # Hello World FastAPI + Nix (no pip/venv)
 
-This repository is a **very small FastAPI application** written in Python.
+This repository is a **simple FastAPI application** written in Python.
 
 Instead of the more common approach:
 
-- using `pip` to install dependencies into a virtual environment (`.venv`), and
-- building from an official Python image like `python:3.14`
+- installing dependencies with `pip` into a virtual environment (`.venv`), and
+- building/running from an official Python image like `python:3.14`
 
 …this project uses **Nix** (via a `flake.nix`) to provide **Python and all Python dependencies** from **nixpkgs**.
 
-That means:
+## Why Nix here?
 
-- no `pip install` / no `uv sync` / no `.venv`
-- the dependency set is defined in `flake.nix` and pinned by `flake.lock`
-- Docker images can run on a minimal base (e.g. distroless) by copying only the required Nix store closure
+Using Nix gives you:
+
+- **Reproducibility**: the dependency set is pinned by `flake.lock`, so the same inputs produce the same environment.
+- **Fewer surprises across machines**: teammates on different laptops/OSes (and CI) get the same Python + libs, without “works on my machine” drift.
+- **No venv management**: no `pip install`, no `uv sync`, no `.venv` to keep in sync.
 
 ---
 
@@ -21,11 +23,11 @@ That means:
 
 ### API endpoints
 
-- `GET /` → returns `{"message": "Hello World"}`
-- `GET /hello/{name}` → returns `{"message": "Hello {name}" }`
-- `GET /health` → returns `{"status": "ok"}`
+- `GET /` → `{"message": "Hello World"}`
+- `GET /hello/{name}` → `{"message": "Hello {name}"}`
+- `GET /health` → `{"status": "ok"}`
 
-### Main file
+### Entry point
 
 The application lives in `main.py` and exposes `app`, so Uvicorn runs it as:
 
@@ -35,8 +37,9 @@ The application lives in `main.py` and exposes `app`, so Uvicorn runs it as:
 
 ## Requirements
 
-- **Nix** with flakes enabled (modern Nix)
-- Optional: Docker (for container builds)
+- **Nix** with flakes enabled
+- Optional: **Docker** (for container builds/runs)
+- Optional: **make** (to use the provided Makefile commands)
 
 ---
 
@@ -68,7 +71,7 @@ Open:
 
 ---
 
-## How dependencies work (important)
+## How dependencies work
 
 Dependencies are **not** installed via `pip`.
 
@@ -77,7 +80,7 @@ They are declared in `flake.nix` using nixpkgs Python packages, for example:
 - `pkgs.python314Packages.fastapi`
 - `pkgs.python314Packages.uvicorn`
 
-Nix then builds a Python environment (often called `pyEnv`) with:
+Nix builds a Python environment (often called `pyEnv`) with:
 
 ```nix
 python.withPackages (ps: with ps; [
@@ -90,7 +93,7 @@ The exact nixpkgs revision is pinned by `flake.lock`.
 
 ---
 
-## Docker (optional)
+## Docker (distroless runtime)
 
 This project can be containerized without relying on `python:3.14` images.
 
@@ -100,15 +103,89 @@ A typical pattern is:
 2. Copy the minimal required `/nix/store` closure + app sources
 3. Run on a small runtime image (e.g. distroless)
 
-Example run command (after building your image):
-
-```bash
-docker run --rm -p 8000:8000 <your-image-name>
-```
-
 ---
 
-## Notes
+## Makefile commands
 
-- If you see: `warning: Git tree is dirty`  
-  Nix is just warning that you have uncommitted changes. It does not break anything.
+A Makefile is included to simplify building and running the container.
+
+### Common workflow
+
+Build the image:
+
+```bash
+make build
+```
+
+Start the service:
+
+```bash
+make start
+```
+
+Follow logs:
+
+```bash
+make logs
+```
+
+Check health:
+
+```bash
+make health
+```
+
+Stop the service:
+
+```bash
+make stop
+```
+
+Remove containers:
+
+```bash
+make down
+```
+
+See status:
+
+```bash
+make status
+```
+
+Show all targets:
+
+```bash
+make help
+```
+
+### Variables
+
+You can override variables like this:
+
+```bash
+make start PORT=9000 HOST=0.0.0.0
+```
+
+Key vars:
+
+- `IMAGE` (default: app name)
+- `CONTAINER` (default: app name)
+- `PORT` (default: 8000)
+- `HOST` (default: 127.0.0.1)
+
+### Docker Compose autodetect
+
+If `compose.yml` or `docker-compose.yml` exists, `make start/stop/logs/...` will use `docker compose`.
+Otherwise it falls back to `docker run`.
+
+### Debug shell
+
+Because distroless images do not include a shell, the Makefile provides:
+
+```bash
+make shell
+```
+
+This opens a `nixos/nix` container with your repo mounted at `/app` for debugging.
+
