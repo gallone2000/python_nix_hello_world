@@ -1,0 +1,28 @@
+[project]
+name = "pokemon-mcp"
+version = "0.1.0"
+description = "MCP server for Pokemon tools built with FastMCP"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastmcp",
+  "httpx",
+  "pydantic>=2.0",
+]
+
+[project.scripts]
+pokemon-mcp = "pokemon_mcp.server:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

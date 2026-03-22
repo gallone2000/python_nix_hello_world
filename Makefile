@@ -1,99 +1,126 @@
-# Makefile for FastAPI (Nix build + distroless runtime)
+SHELL := /bin/bash
 
-APP_NAME ?= fastapi-nix
-IMAGE ?= $(APP_NAME)
-PORT ?= 8000
-HOST ?= 127.0.0.1
-CONTAINER ?= $(APP_NAME)
-DOCKERFILE ?= Dockerfile
+COMPOSE_DIR := infra/compose
+COMPOSE := docker compose -f $(COMPOSE_DIR)/docker-compose.yml
 
-# Compose autodetect
-COMPOSE_FILE :=
-ifneq (,$(wildcard compose.yml))
-  COMPOSE_FILE := compose.yml
-endif
-ifneq (,$(wildcard docker-compose.yml))
-  COMPOSE_FILE := docker-compose.yml
-endif
+OLLAMA_CONTAINER := ollama
+OLLAMA_MODEL ?= llama3.1:8b
 
-ifeq ($(strip $(COMPOSE_FILE)),)
-  USE_COMPOSE := 0
-else
-  USE_COMPOSE := 1
-endif
+.DEFAULT_GOAL := help
 
-.PHONY: help build start stop restart down logs shell status health
+.PHONY: help init up up-d build down down-v restart ps status health logs logs-librechat logs-ollama logs-mcp \
+        pull-model list-models clean mcp-test librechat-url ollama-url test test-unit test-integration
 
 help: ## Show available commands
-	@echo "Usage: make <target>"
 	@echo ""
-	@echo "Targets:"
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
+	@echo "Pokemon monorepo commands"
 	@echo ""
-	@echo "Vars (override like: make start PORT=9000 HOST=0.0.0.0):"
-	@echo "  IMAGE=$(IMAGE)"
-	@echo "  CONTAINER=$(CONTAINER)"
-	@echo "  PORT=$(PORT)"
-	@echo "  HOST=$(HOST)"
-	@if [ "$(USE_COMPOSE)" = "1" ]; then \
-		echo "  COMPOSE_FILE=$(COMPOSE_FILE)"; \
+	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo ""
+
+init: ## Prepare LibreChat .env from template if missing
+	@if [ ! -f apps/librechat/.env ]; then \
+		cp apps/librechat/.env.example apps/librechat/.env; \
+		echo "Created apps/librechat/.env from .env.example"; \
 	else \
-		echo "  COMPOSE_FILE= (not found; using docker run)"; \
+		echo "apps/librechat/.env already exists"; \
 	fi
 
-build: ## Build the Docker image
-	docker build -t $(IMAGE) -f $(DOCKERFILE) .
+build: ## Build all Docker services
+	$(COMPOSE) build
 
-start: build ## Start the service (compose up or docker run)
-	@if [ "$(USE_COMPOSE)" = "1" ]; then \
-		docker compose -f $(COMPOSE_FILE) up -d --build; \
+up: ## Start the full stack in foreground
+	$(COMPOSE) up --build
+
+up-d: ## Start the full stack in background
+	$(COMPOSE) up --build -d
+
+down: ## Stop the full stack
+	$(COMPOSE) down
+
+down-v: ## Stop the full stack and remove volumes
+	$(COMPOSE) down -v
+
+restart: ## Restart the full stack
+	$(COMPOSE) down
+	$(COMPOSE) up --build -d
+
+ps: ## Show running services
+	$(COMPOSE) ps
+
+status: ## Show stack status, key URLs, and installed Ollama models
+	@echo ""
+	@echo "=== Docker services ==="
+	@$(COMPOSE) ps || true
+	@echo ""
+	@echo "=== URLs ==="
+	@echo "LibreChat:   http://localhost:3080"
+	@echo "Ollama:      http://localhost:11434"
+	@echo "Pokemon MCP: http://localhost:8000/mcp"
+	@echo ""
+	@echo "=== Ollama models ==="
+	@docker exec $(OLLAMA_CONTAINER) ollama list 2>/dev/null || echo "Ollama container not ready"
+	@echo ""
+
+health: ## Run quick health checks for LibreChat, Ollama, and Pokemon MCP
+	@echo ""
+	@echo "=== LibreChat ==="
+	@code=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3080 || true); \
+	if [ "$$code" = "200" ] || [ "$$code" = "302" ] || [ "$$code" = "304" ]; then \
+		echo "OK  LibreChat responded with HTTP $$code"; \
 	else \
-		docker rm -f $(CONTAINER) >/dev/null 2>&1 || true; \
-		docker run -d --name $(CONTAINER) -p $(HOST):$(PORT):8000 $(IMAGE); \
+		echo "ERR LibreChat responded with HTTP $$code"; \
 	fi
-	@echo "Running on http://$(HOST):$(PORT)/ (docs: /docs, health: /health)"
-
-stop: ## Stop the service (compose stop or docker stop)
-	@if [ "$(USE_COMPOSE)" = "1" ]; then \
-		docker compose -f $(COMPOSE_FILE) stop; \
+	@echo ""
+	@echo "=== Ollama ==="
+	@code=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:11434/api/tags || true); \
+	if [ "$$code" = "200" ]; then \
+		echo "OK  Ollama responded with HTTP $$code"; \
 	else \
-		docker stop $(CONTAINER) >/dev/null 2>&1 || true; \
+		echo "ERR Ollama responded with HTTP $$code"; \
 	fi
-
-restart: ## Restart the service
-	@if [ "$(USE_COMPOSE)" = "1" ]; then \
-		docker compose -f $(COMPOSE_FILE) restart; \
+	@echo ""
+	@echo "=== Pokemon MCP ==="
+	@code=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/mcp || true); \
+	if [ -n "$$code" ] && [ "$$code" != "000" ]; then \
+		echo "OK  Pokemon MCP responded with HTTP $$code"; \
 	else \
-		docker restart $(CONTAINER) >/dev/null 2>&1 || true; \
+		echo "ERR Pokemon MCP did not respond"; \
 	fi
+	@echo ""
 
-down: ## Stop and remove containers (compose down or docker rm)
-	@if [ "$(USE_COMPOSE)" = "1" ]; then \
-		docker compose -f $(COMPOSE_FILE) down; \
-	else \
-		docker rm -f $(CONTAINER) >/dev/null 2>&1 || true; \
-	fi
+logs: ## Tail logs for all services
+	$(COMPOSE) logs -f --tail=100
 
-status: ## Show container/service status
-	@if [ "$(USE_COMPOSE)" = "1" ]; then \
-		docker compose -f $(COMPOSE_FILE) ps; \
-	else \
-		docker ps --filter "name=$(CONTAINER)"; \
-	fi
+logs-librechat: ## Tail LibreChat logs
+	$(COMPOSE) logs -f --tail=100 librechat
 
-logs: ## Follow logs (compose logs -f or docker logs -f)
-	@if [ "$(USE_COMPOSE)" = "1" ]; then \
-		docker compose -f $(COMPOSE_FILE) logs -f; \
-	else \
-		docker logs -f $(CONTAINER); \
-	fi
+logs-ollama: ## Tail Ollama logs
+	$(COMPOSE) logs -f --tail=100 ollama
 
-health: ## Call the /health endpoint (requires curl)
-	@command -v curl >/dev/null 2>&1 || { echo "curl not found"; exit 1; }
-	@curl -fsS "http://$(HOST):$(PORT)/health" || (echo && echo "Health check failed" && exit 1)
-	@echo
+logs-mcp: ## Tail pokemon-mcp logs
+	$(COMPOSE) logs -f --tail=100 pokemon-mcp
 
-shell: ## Open a debug shell in a nixos/nix container with your repo mounted (distroless has no shell)
-	@echo "Opening debug shell (nixos/nix) with repo mounted at /app..."
-	docker run --rm -it -v "$(PWD):/app" -w /app nixos/nix:2.22.1 sh
+pull-model: ## Pull an Ollama model. Override with: make pull-model OLLAMA_MODEL=qwen2.5:7b
+	docker exec -it $(OLLAMA_CONTAINER) ollama pull $(OLLAMA_MODEL)
+
+list-models: ## List models installed in Ollama
+	docker exec -it $(OLLAMA_CONTAINER) ollama list
+
+test: ## Run all tests inside the pokemon-mcp container
+	$(COMPOSE) exec -T pokemon-mcp pytest -q
+
+test-unit: ## Run unit tests only inside the pokemon-mcp container
+	$(COMPOSE) exec -T pokemon-mcp pytest -q -m "not integration"
+
+test-integration: ## Run integration tests only inside the pokemon-mcp container
+	$(COMPOSE) exec -T pokemon-mcp pytest -q -m integration
+
+librechat-url: ## Print LibreChat URL
+	@echo "http://localhost:3080"
+
+ollama-url: ## Print Ollama URL
+	@echo "http://localhost:11434"
+
+clean: ## Stop stack and remove volumes
+	$(COMPOSE) down -v

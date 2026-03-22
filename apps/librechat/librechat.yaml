@@ -1,0 +1,28 @@
+version: 1.2.8
+
+cache: true
+
+endpoints:
+  custom:
+    - name: "Ollama"
+      apiKey: "ollama"
+      baseURL: "http://ollama:11434/v1/"
+      models:
+        default:
+          - "llama3.1:8b"
+        fetch: false
+      titleConvo: true
+      titleModel: "current_model"
+      summarize: false
+      modelDisplayLabel: "Ollama"
+
+mcpSettings:
+  allowedDomains:
+    - "pokemon-mcp"
+    - "http://pokemon-mcp:8000"
+    - "http://pokemon-mcp:8000/mcp"
+
+mcpServers:
+  pokemon:
+    type: streamable-http
+    url: "http://pokemon-mcp:8000/mcp"
